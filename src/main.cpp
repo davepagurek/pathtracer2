@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #include <jitify.hpp>
 
@@ -26,7 +27,7 @@
 
 const auto floatsPerPixel = std::size_t{4}; // Technically only 3 are needed, but 4 aligns nicely (performance difference is untested)
 
-void draw_image(std::vector<float>& out, std::size_t imgWidth, std::size_t imgHeight, int iterations, float angle, float power) {
+void draw_image(std::vector<float>& out, std::size_t imgWidth, std::size_t imgHeight, int iterations, float angle, float power, float time) {
     static jitify::JitCache kernel_cache;
 
     jitify::Program program = kernel_cache.program(
@@ -61,7 +62,7 @@ void draw_image(std::vector<float>& out, std::size_t imgWidth, std::size_t imgHe
     CHECK_CUDA(program.kernel("renderKernel")
         .instantiate<int>(iterations)
         .configure(grid, block)
-        .launch(d_data, imgWidth, imgHeight, angle, power)
+        .launch(d_data, imgWidth, imgHeight, angle, power, time)
     );
 
     cudaMemcpy(out.data(), d_data, total_bytes, cudaMemcpyDeviceToHost);
@@ -75,6 +76,12 @@ int main() {
     auto power = 8.0f;
     auto iterations = 512;
 
+	auto time = 0.0f;
+	auto frame = 1;
+	const auto frameRate = 30.0f;
+	const auto renderFrames = true;
+
+
     const auto moveStep = 0.05f;
     const auto scaleRatio = 1.05f;
 
@@ -87,7 +94,7 @@ int main() {
     auto tex = sf::Texture();
 
     const auto update = [&](){
-        draw_image(data, w, h, iterations, angle, power);
+        draw_image(data, w, h, iterations, angle, power, time);
         assert(data.size() == (w * h * floatsPerPixel));
         for (std::size_t y = 0; y < h; ++y) {
             for (std::size_t x = 0; x < w; ++x) {
@@ -110,6 +117,8 @@ int main() {
         },
         "Path Tracer Demo"
     );
+
+	sf::Clock clock;
 
     update();
     auto sprite = sf::Sprite(tex);
@@ -142,7 +151,20 @@ int main() {
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down)) {
             power -= 0.1f;
         }
+		if (renderFrames) {
+			time += 1.0f / frameRate;
+			//angle += 0.005;
+			++frame;
+		}
+		else {
+			time = clock.getElapsedTime().asSeconds();
+		}
         update();
+		if (renderFrames) {
+			std::stringstream filename;
+			filename << "frame" << std::setfill('0') << std::setw(5) << frame << ".png";
+			sprite.getTexture()->copyToImage().saveToFile(filename.str());
+		}
 
         win.clear(sf::Color::Black);
         win.draw(sprite);

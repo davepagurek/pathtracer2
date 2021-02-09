@@ -99,6 +99,23 @@ __device__ float wrapNearZero(float v) {
     }
 }
 
+__device__ float jitter(float mixAmount, float offset) {
+	float amount = 0.0;
+	float scale = 1.0;
+	for (int power = 0; power < 3; power++) {
+		amount += sin((offset * 1234.0 + mixAmount) * scale) / scale;
+		scale *= 2.0;
+	}
+
+	amount *= 0.09;
+
+	return amount;
+}
+
+__device__ vec warp(const vec& v, float scale, float time) {
+	return v + scale * vec(jitter(v.x, time + 0.0), jitter(v.y, time + 0.2), jitter(v.z, time + 0.5));
+}
+
 
 __device__ float signedDistance(vec v, float power) {
     auto z = v;
@@ -143,7 +160,7 @@ __device__ vec bounce(vec v, vec n) {
 }
 
 template<int N>
-__device__ vec rayMarch(vec p, vec d, float power) {
+__device__ vec rayMarch(vec p, vec d, float power, float time) {
     const float minDist = 1e-4f;
     const auto lightDir = vec(0.5f, -1.0f, -0.3f).unit();
     bool hit = false;
@@ -157,7 +174,7 @@ __device__ vec rayMarch(vec p, vec d, float power) {
     const auto stepSize = 0.5f;
 
     for (int i = 0; i < N; ++i) {
-        const float dist = signedDistance(p, power);
+        const float dist = signedDistance(warp(p, 1.5, time / 3000.0), power);
         if (hit) {
             distSinceHit += abs(dist);
             const float lightTanAngle = abs(dist) / distSinceHit;
@@ -180,7 +197,7 @@ __device__ vec rayMarch(vec p, vec d, float power) {
 }
 
 template<int N>
-__global__ void renderKernel(float* out_data, size_t sizeX, size_t sizeY, float angle, float power) {
+__global__ void renderKernel(float* out_data, size_t sizeX, size_t sizeY, float angle, float power, float time) {
     const int ix = blockIdx.x * blockDim.x + threadIdx.x;
     const int iy = blockIdx.y * blockDim.y + threadIdx.y;
     if (ix >= sizeX || iy >= sizeY){
@@ -190,7 +207,7 @@ __global__ void renderKernel(float* out_data, size_t sizeX, size_t sizeY, float 
     const float screenX = -1.0f + 2.0f * static_cast<float>(ix) / static_cast<float>(sizeX);
     const float screenY = -1.0f + 2.0f * static_cast<float>(iy) / static_cast<float>(sizeY);
 
-    const auto cameraDist = 5.0f;
+    const auto cameraDist = 4.0f;
 
     float sinAngle;
     float cosAngle;
@@ -218,7 +235,7 @@ __global__ void renderKernel(float* out_data, size_t sizeX, size_t sizeY, float 
     const auto cameraSensorPos = cameraPos + cameraDisplacement;
     const auto cameraSensorDir = cameraDir + fovFactor * cameraDisplacement;
 
-    const auto colour = rayMarch<N>(cameraSensorPos, cameraSensorDir, power);
+    const auto colour = rayMarch<N>(cameraSensorPos, cameraSensorDir, power, time);
 
     const auto base = 4 * (ix + iy * sizeX);
     out_data[base + 0] = colour.x;
